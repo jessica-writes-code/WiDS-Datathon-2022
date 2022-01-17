@@ -4,6 +4,8 @@ from re import sub
 from typing import List, Optional
 
 import pandas as pd
+from sklearn.exceptions import NotFittedError
+from sklearn.preprocessing import OneHotEncoder
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
@@ -89,34 +91,34 @@ class ModelMatchPredictor(MatchPredictor):
     """Predictions based on model, either within matched records or
     across dataset (when matched records are unavailable)"""
 
+    CONTINUOUS_VARIABLES = ["avg_temp", "floor_area", "energy_star_rating", "year_built"]
     FILL_VALUES = {}
-
-    def _cleanX(self, X: pd.DataFrame) -> pd.DataFrame:
+    NORM_VALUES = {}
+    
+    def _clean_nonmatch_X(self, X: pd.DataFrame) -> pd.DataFrame:
 
         X = copy.deepcopy(X)
+        keep_vars = []
 
-        X["year_built_na"] = pd.isna(X["year_built"]).astype(int)
-        if "year_built" not in self.FILL_VALUES:
-            self.FILL_VALUES["year_built"] = X["year_built"].mean()
-        X["year_built"] = X["year_built"].fillna(self.FILL_VALUES["year_built"])
+        # Continuous variables
+        for var_name in self.CONTINUOUS_VARIABLES:
+            keep_vars.append(var_name)
 
-        X["energy_star_rating_na"] = pd.isna(X["energy_star_rating"]).astype(int)
-        if "energy_star_rating" not in self.FILL_VALUES:
-            self.FILL_VALUES["energy_star_rating"] = X["energy_star_rating"].mean()
-        X["energy_star_rating"] = X["energy_star_rating"].fillna(
-            self.FILL_VALUES["energy_star_rating"]
-        )
+            # handle NaNs
+            if sum(pd.isna(X[var_name])) > 0:  
+                keep_vars.append(f"{var_name}_na")
+                X[f"{var_name}_na"] = pd.isna(X[var_name]).astype(int)
+                if var_name not in self.FILL_VALUES:
+                    self.FILL_VALUES[var_name] = X[var_name].mean()
+                X[var_name] = X[var_name].fillna(self.FILL_VALUES[var_name])
 
-        return X[
-            [
-                "floor_area",
-                "avg_temp",
-                "year_built",
-                "year_built_na",
-                "energy_star_rating",
-                "energy_star_rating_na",
-            ]
-        ]
+            # normalize
+            if var_name not in self.NORM_VALUES:
+                self.NORM_VALUES[var_name] = (X[var_name].mean(), X[var_name].std())
+            avg, sd = self.NORM_VALUES[var_name]
+            X[var_name] = (X[var_name] - avg) / sd
+
+        return X[keep_vars]
 
     def fit(self, X: pd.DataFrame, y: pd.Series):
         assert TARGET_COL_NAME not in X.columns
@@ -132,7 +134,7 @@ class ModelMatchPredictor(MatchPredictor):
         from sklearn.ensemble import GradientBoostingRegressor
 
         self._regr = GradientBoostingRegressor()
-        self._regr.fit(self._cleanX(X), y)
+        self._regr.fit(self._clean_nonmatch_X(X), y)
 
         self.fitted = True
 
@@ -147,5 +149,5 @@ class ModelMatchPredictor(MatchPredictor):
 
     def _predict_nonmatches(self, X: pd.DataFrame) -> pd.Series:
         temp = X[[ID_COL_NAME]]
-        temp[TARGET_COL_NAME] = self._regr.predict(self._cleanX(X))
+        temp[TARGET_COL_NAME] = self._regr.predict(self._clean_nonmatch_X(X))
         return temp
