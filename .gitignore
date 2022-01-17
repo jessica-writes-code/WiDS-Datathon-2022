@@ -1,0 +1,9 @@
+# Input & Results
+data
+*.csv
+
+# Miscellaneous garbage
+__pycache__
+.DS_Store
+.ipynb_checkpoints
+
