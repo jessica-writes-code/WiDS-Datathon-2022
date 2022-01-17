@@ -4,8 +4,7 @@ from re import sub
 from typing import List, Optional
 
 import pandas as pd
-from sklearn.exceptions import NotFittedError
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.ensemble import GradientBoostingRegressor
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
@@ -91,10 +90,15 @@ class ModelMatchPredictor(MatchPredictor):
     """Predictions based on model, either within matched records or
     across dataset (when matched records are unavailable)"""
 
-    CONTINUOUS_VARIABLES = ["avg_temp", "floor_area", "energy_star_rating", "year_built"]
+    CONTINUOUS_VARIABLES = [
+        "avg_temp",
+        "floor_area",
+        "energy_star_rating",
+        "year_built",
+    ]
     FILL_VALUES = {}
     NORM_VALUES = {}
-    
+
     def _clean_nonmatch_X(self, X: pd.DataFrame) -> pd.DataFrame:
 
         X = copy.deepcopy(X)
@@ -105,7 +109,7 @@ class ModelMatchPredictor(MatchPredictor):
             keep_vars.append(var_name)
 
             # handle NaNs
-            if sum(pd.isna(X[var_name])) > 0:  
+            if sum(pd.isna(X[var_name])) > 0:
                 keep_vars.append(f"{var_name}_na")
                 X[f"{var_name}_na"] = pd.isna(X[var_name]).astype(int)
                 if var_name not in self.FILL_VALUES:
@@ -131,8 +135,6 @@ class ModelMatchPredictor(MatchPredictor):
 
         # Train a model to be used on test observations that do not
         # match any of our training observations
-        from sklearn.ensemble import GradientBoostingRegressor
-
         self._regr = GradientBoostingRegressor()
         self._regr.fit(self._clean_nonmatch_X(X), y)
 
