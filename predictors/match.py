@@ -9,14 +9,16 @@ from sklearn.ensemble import GradientBoostingRegressor
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
-class AverageMatchPredictor():
+
+class AverageMatchPredictor:
     pass  # TODO
 
-class ModelMatchPredictor():
+
+class ModelMatchPredictor:
     """Predictions based on model, either within matched records or
     across dataset (when matched records are unavailable)"""
 
-    MATCH_KEYS = ['floor_area', 'year_built']
+    MATCH_KEYS = ["floor_area", "year_built"]
 
     @staticmethod
     def clean_dfs(
@@ -90,9 +92,9 @@ class ModelMatchPredictor():
 
     def fit(self, train_df: pd.DataFrame):
 
-        # 
+        #
         self._match_df = train_df.groupby(self.MATCH_KEYS, as_index=False).mean()[
-            self.MATCH_KEYS + ['site_eui']
+            self.MATCH_KEYS + ["site_eui"]
         ]
 
         # Train a model to be used on test observations that do not
@@ -100,15 +102,17 @@ class ModelMatchPredictor():
         # - Note: We are predicting `log_site_eui`
         self._regr = GradientBoostingRegressor()
         self._regr.fit(
-            train_df[[
-                "avg_temp",
-                "floor_area",
-                "log_floor_area",
-                "std_year_built",
-                "log_year_built",
-                "na_year_built",
-                "std_energy_star_rating",
-            ]],
+            train_df[
+                [
+                    "avg_temp",
+                    "floor_area",
+                    "log_floor_area",
+                    "std_year_built",
+                    "log_year_built",
+                    "na_year_built",
+                    "std_energy_star_rating",
+                ]
+            ],
             train_df["site_eui"],
         )
 
@@ -121,17 +125,19 @@ class ModelMatchPredictor():
         # TODO: Comments
         predictions = pd.Series(
             self._regr.predict(
-                test_df[[
-                    "avg_temp",
-                    "floor_area",
-                    "log_floor_area",
-                    "std_year_built",
-                    "log_year_built",
-                    "na_year_built",
-                    "std_energy_star_rating",
-                ]],
+                test_df[
+                    [
+                        "avg_temp",
+                        "floor_area",
+                        "log_floor_area",
+                        "std_year_built",
+                        "log_year_built",
+                        "na_year_built",
+                        "std_energy_star_rating",
+                    ]
+                ],
             )
         )
         test_df["site_eui"] = test_df["site_eui"].fillna(predictions)
 
-        return test_df[['id', 'site_eui']]
+        return test_df[["id", "site_eui"]]
