@@ -1,155 +1,137 @@
 from abc import ABC, abstractmethod
 import copy
 from re import sub
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
-TARGET_COL_NAME = "__TARGET"
-ID_COL_NAME = "__ID"
+class AverageMatchPredictor():
+    pass  # TODO
 
-
-class MatchPredictor(ABC):
-    """Abstract base class for a predictor based on matching test records
-    with train records"""
-
-    def __init__(self, keys=["year_built", "floor_area"]):
-        self.keys = keys
-        self.fitted = False
-
-    @abstractmethod
-    def fit(self, X: pd.DataFrame, y: pd.Series):
-        """Capture information from training data"""
-
-    @abstractmethod
-    def _is_match(self, X: pd.DataFrame) -> List[bool]:
-        """Determine which elements of the test data are matches"""
-
-    @abstractmethod
-    def _predict_matches(self, X: pd.DataFrame) -> pd.Series:
-        """Predict on matched records from test data"""
-
-    @abstractmethod
-    def _predict_nonmatches(self, X: pd.DataFrame) -> pd.Series:
-        """Predict on unmatched records from test data"""
-
-    def predict(self, X: pd.DataFrame) -> pd.Series:
-        """Predict on test data"""
-        if not self.fitted:
-            raise ValueError
-
-        X = copy.deepcopy(X)
-        X[ID_COL_NAME] = X.index
-        is_match = self._is_match(X)
-        is_not_match = [not x for x in is_match]
-
-        matched_df = self._predict_matches(X[is_match])
-        nonmatched_df = self._predict_nonmatches(X[is_not_match])
-        full_df = pd.concat([matched_df, nonmatched_df], axis=0).sort_values(
-            ID_COL_NAME
-        )
-
-        assert len(full_df) == len(X)
-
-        return list(full_df[TARGET_COL_NAME])
-
-
-class AverageMatchPredictor(MatchPredictor):
-    """Predictions based on average, either within matched records or
-    across dataset (when matched records are unavailable)"""
-
-    def fit(self, X: pd.DataFrame, y: pd.Series):
-        assert TARGET_COL_NAME not in X.columns
-        X = copy.deepcopy(X)
-        X[TARGET_COL_NAME] = y
-        self._match_df = X.groupby(self.keys, as_index=False).mean()[
-            self.keys + [TARGET_COL_NAME]
-        ]
-        self._avg_value = sum(y) / len(y)
-        self.fitted = True
-
-    def _is_match(self, X: pd.DataFrame) -> List[bool]:
-        tmp = X.merge(self._match_df, on=self.keys, how="left")
-        return [not item for i, item in pd.isna(tmp[TARGET_COL_NAME]).iteritems()]
-
-    def _predict_matches(self, X: pd.DataFrame) -> pd.Series:
-        return X.merge(self._match_df, on=self.keys, how="inner")[
-            [TARGET_COL_NAME, ID_COL_NAME]
-        ]
-
-    def _predict_nonmatches(self, X: pd.DataFrame) -> pd.Series:
-        temp = X[[ID_COL_NAME]]
-        temp[TARGET_COL_NAME] = self._avg_value
-        return temp
-
-
-class ModelMatchPredictor(MatchPredictor):
+class ModelMatchPredictor():
     """Predictions based on model, either within matched records or
     across dataset (when matched records are unavailable)"""
 
-    CONTINUOUS_VARIABLES = [
-        "avg_temp",
-        "floor_area",
-        "energy_star_rating",
-        "year_built",
-    ]
-    FILL_VALUES = {}
-    NORM_VALUES = {}
+    MATCH_KEYS = ['floor_area', 'year_built']
 
-    def _clean_nonmatch_X(self, X: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    def clean_dfs(
+        train_df: pd.DataFrame, test_df: pd.DataFrame
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
 
-        X = copy.deepcopy(X)
-        keep_vars = []
+        # Combine data sets
+        train_df["_DATASET"] = "train"
+        test_df["_DATASET"] = "test"
+        df = pd.concat([train_df, test_df])
 
-        # Continuous variables
-        for var_name in self.CONTINUOUS_VARIABLES:
-            keep_vars.append(var_name)
+        # Drop "State_6" from `State_Factor` - It is not represented in the test set
+        assert "State_6" not in test_df["State_Factor"]
+        df = df[df["State_Factor"] != "State_6"]
 
-            # handle NaNs
-            if sum(pd.isna(X[var_name])) > 0:
-                keep_vars.append(f"{var_name}_na")
-                X[f"{var_name}_na"] = pd.isna(X[var_name]).astype(int)
-                if var_name not in self.FILL_VALUES:
-                    self.FILL_VALUES[var_name] = X[var_name].mean()
-                X[var_name] = X[var_name].fillna(self.FILL_VALUES[var_name])
+        # `floor_area`
+        df["log_floor_area"] = np.log(df["floor_area"])
 
-            # normalize
-            if var_name not in self.NORM_VALUES:
-                self.NORM_VALUES[var_name] = (X[var_name].mean(), X[var_name].std())
-            avg, sd = self.NORM_VALUES[var_name]
-            X[var_name] = (X[var_name] - avg) / sd
+        # `energy_star_rating`
+        keys = ["State_Factor", "floor_area", "year_built"]
 
-        return X[keep_vars]
+        avg_df = (
+            df[~pd.isna(df["energy_star_rating"])]
+            .groupby(keys, as_index=False)
+            .mean()[keys + ["energy_star_rating"]]
+        )
+        avg_df = avg_df.rename(columns={"energy_star_rating": "avg_energy_star_rating"})
 
-    def fit(self, X: pd.DataFrame, y: pd.Series):
-        assert TARGET_COL_NAME not in X.columns
-        X = copy.deepcopy(X)
-        X[TARGET_COL_NAME] = y
+        df = df.merge(avg_df, on=keys, how="left")
+        df["std_energy_star_rating"] = (
+            df["energy_star_rating"]
+            .fillna(df["avg_energy_star_rating"])
+            .fillna(df[df["_DATASET"] == "train"]["energy_star_rating"].mean())
+        )
 
-        self._match_df = X.groupby(self.keys, as_index=False).mean()[
-            self.keys + [TARGET_COL_NAME]
+        # `year_built`
+        df.loc[df["year_built"] == 0, "year_built"] = np.NaN
+        df["na_year_built"] = pd.isna(df["year_built"])
+        df["std_year_built"] = df["year_built"].fillna(
+            df[df["_DATASET"] == "train"]["year_built"].mean()
+        )
+        df["log_year_built"] = np.log(df["std_year_built"])
+
+        # `site_eui`
+        df["log_site_eui"] = np.log(df["site_eui"])
+
+        # Down-select to only useful columns
+        df = df[
+            [
+                "id",
+                "_DATASET",
+                "avg_temp",
+                "floor_area",
+                "log_floor_area",
+                "year_built",
+                "std_year_built",
+                "log_year_built",
+                "na_year_built",
+                "std_energy_star_rating",
+                "site_eui",
+                "log_site_eui",
+            ]
+        ]
+
+        return (
+            df[df["_DATASET"] == "train"].drop("_DATASET", axis=1),
+            df[df["_DATASET"] == "test"].drop(
+                ["_DATASET", "site_eui", "log_site_eui"], axis=1
+            ),
+        )
+
+    def fit(self, train_df: pd.DataFrame):
+
+        # 
+        self._match_df = train_df.groupby(self.MATCH_KEYS, as_index=False).mean()[
+            self.MATCH_KEYS + ['site_eui']
         ]
 
         # Train a model to be used on test observations that do not
         # match any of our training observations
+        # - Note: We are predicting `log_site_eui`
         self._regr = GradientBoostingRegressor()
-        self._regr.fit(self._clean_nonmatch_X(X), y)
+        self._regr.fit(
+            train_df[[
+                "avg_temp",
+                "floor_area",
+                "log_floor_area",
+                "std_year_built",
+                "log_year_built",
+                "na_year_built",
+                "std_energy_star_rating",
+            ]],
+            train_df["site_eui"],
+        )
 
         self.fitted = True
 
-    def _is_match(self, X: pd.DataFrame) -> List[bool]:
-        tmp = X.merge(self._match_df, on=self.keys, how="left")
-        return [not item for i, item in pd.isna(tmp[TARGET_COL_NAME]).iteritems()]
+    def predict(self, test_df: pd.DataFrame) -> pd.DataFrame:
+        # TODO: Comments
+        test_df = test_df.merge(self._match_df, on=self.MATCH_KEYS, how="left")
 
-    def _predict_matches(self, X: pd.DataFrame) -> pd.Series:
-        return X.merge(self._match_df, on=self.keys, how="inner")[
-            [TARGET_COL_NAME, ID_COL_NAME]
-        ]
+        # TODO: Comments
+        predictions = pd.Series(
+            self._regr.predict(
+                test_df[[
+                    "avg_temp",
+                    "floor_area",
+                    "log_floor_area",
+                    "std_year_built",
+                    "log_year_built",
+                    "na_year_built",
+                    "std_energy_star_rating",
+                ]],
+            )
+        )
+        test_df["site_eui"] = test_df["site_eui"].fillna(predictions)
 
-    def _predict_nonmatches(self, X: pd.DataFrame) -> pd.Series:
-        temp = X[[ID_COL_NAME]]
-        temp[TARGET_COL_NAME] = self._regr.predict(self._clean_nonmatch_X(X))
-        return temp
+        return test_df[['id', 'site_eui']]
