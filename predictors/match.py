@@ -48,7 +48,6 @@ class ModelMatchPredictor:
                     *self.MATCH_KEYS,
                     *self.PRED_VARS1,
                     "site_eui",
-                    "log_site_eui",
                 ]
             )
         )
@@ -59,7 +58,7 @@ class ModelMatchPredictor:
         df = pd.concat([train_df, test_df])
 
         # `State_Factor`
-        # Drop "State_6" from `State_Factor` - It is not represented in the test set
+        # - Drop "State_6" from `State_Factor`; it is not represented in the test set
         assert "State_6" not in test_df["State_Factor"]
         df = df[df["State_Factor"] != "State_6"]
 
@@ -85,6 +84,9 @@ class ModelMatchPredictor:
             .fillna(df[df["_DATASET"] == "train"]["energy_star_rating"].median())
         )
 
+        # `avg_temp`
+        # TODO: avg temp vs. avg temp in the state, normally
+
         # `year_built`
         df.loc[df["year_built"] == 0, "year_built"] = np.NaN
         df["na_year_built"] = pd.isna(df["year_built"])
@@ -93,16 +95,13 @@ class ModelMatchPredictor:
         )
         df["log_year_built"] = np.log(df["std_year_built"])
 
-        # `site_eui`
-        df["log_site_eui"] = np.log(df["site_eui"])
-
         # Down-select to only useful columns
         df = df[KEEP_VARS]
 
         return (
             df[df["_DATASET"] == "train"].drop("_DATASET", axis=1),
             df[df["_DATASET"] == "test"].drop(
-                ["_DATASET", "site_eui", "log_site_eui"], axis=1
+                ["_DATASET", "site_eui"], axis=1
             ),
         )
 
@@ -117,7 +116,7 @@ class ModelMatchPredictor:
         # match any of our training observations
         self._regr = GradientBoostingRegressor()
         self._regr.fit(
-            train_df[self.PRED_VARS1], train_df["site_eui"],
+            train_df[self.PRED_VARS1], train_df["site_eui"]
         )
 
         self.fitted = True
