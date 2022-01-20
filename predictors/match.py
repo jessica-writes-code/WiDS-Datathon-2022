@@ -18,11 +18,25 @@ class ModelMatchPredictor:
     """Predictions based on model, either within matched records or
     across dataset (when matched records are unavailable)"""
 
-    MATCH_KEYS = ["floor_area", "year_built"]
+    MATCH_KEYS = ["State_Factor", "floor_area", "year_built"]
+    KEEP_VARS = [
+                "id",
+                "_DATASET",
+                "State_Factor",
+                "avg_temp",
+                "floor_area",
+                "log_floor_area",
+                "year_built",
+                "std_year_built",
+                "log_year_built",
+                "na_year_built",
+                "std_energy_star_rating",
+                "site_eui",
+                "log_site_eui",
+            ]
 
-    @staticmethod
     def clean_dfs(
-        train_df: pd.DataFrame, test_df: pd.DataFrame
+        self, train_df: pd.DataFrame, test_df: pd.DataFrame
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
 
         # Combine data sets
@@ -30,29 +44,33 @@ class ModelMatchPredictor:
         test_df["_DATASET"] = "test"
         df = pd.concat([train_df, test_df])
 
+        # `State_Factor`
         # Drop "State_6" from `State_Factor` - It is not represented in the test set
         assert "State_6" not in test_df["State_Factor"]
         df = df[df["State_Factor"] != "State_6"]
+
+        # `building_class`
+        df["is_commercial"] = df["building_class"] == "Commercial"
 
         # `floor_area`
         df["log_floor_area"] = np.log(df["floor_area"])
 
         # `energy_star_rating`
-        keys = ["State_Factor", "floor_area", "year_built"]
-
+        df["na_energy_star_rating"] = pd.isna(df["energy_star_rating"])
         avg_df = (
             df[~pd.isna(df["energy_star_rating"])]
-            .groupby(keys, as_index=False)
-            .mean()[keys + ["energy_star_rating"]]
+            .groupby(self.MATCH_KEYS, as_index=False)
+            .mean()[self.MATCH_KEYS + ["energy_star_rating"]]
         )
         avg_df = avg_df.rename(columns={"energy_star_rating": "avg_energy_star_rating"})
 
-        df = df.merge(avg_df, on=keys, how="left")
+        df = df.merge(avg_df, on=self.MATCH_KEYS, how="left")
         df["std_energy_star_rating"] = (
             df["energy_star_rating"]
             .fillna(df["avg_energy_star_rating"])
             .fillna(df[df["_DATASET"] == "train"]["energy_star_rating"].mean())
         )
+        # TODO: Try median?
 
         # `year_built`
         df.loc[df["year_built"] == 0, "year_built"] = np.NaN
@@ -66,22 +84,8 @@ class ModelMatchPredictor:
         df["log_site_eui"] = np.log(df["site_eui"])
 
         # Down-select to only useful columns
-        df = df[
-            [
-                "id",
-                "_DATASET",
-                "avg_temp",
-                "floor_area",
-                "log_floor_area",
-                "year_built",
-                "std_year_built",
-                "log_year_built",
-                "na_year_built",
-                "std_energy_star_rating",
-                "site_eui",
-                "log_site_eui",
-            ]
-        ]
+        # TODO: move lists of variables to class vars
+        df = df[self.KEEP_VARS]
 
         return (
             df[df["_DATASET"] == "train"].drop("_DATASET", axis=1),
@@ -92,7 +96,8 @@ class ModelMatchPredictor:
 
     def fit(self, train_df: pd.DataFrame):
 
-        #
+        # TODO: Try most recent year, instead of average
+        # TODO: Try median?
         self._match_df = train_df.groupby(self.MATCH_KEYS, as_index=False).mean()[
             self.MATCH_KEYS + ["site_eui"]
         ]
