@@ -109,7 +109,6 @@ class ModelMatchPredictor:
     def fit(self, train_df: pd.DataFrame):
 
         # TODO: Try most recent year, instead of average
-        # TODO: Try median?
         self._match_df = train_df.groupby(self.MATCH_KEYS, as_index=False).mean()[
             self.MATCH_KEYS + ["site_eui"]
         ]
