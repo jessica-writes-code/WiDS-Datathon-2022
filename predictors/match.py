@@ -60,7 +60,7 @@ class ModelMatchPredictor:
         avg_df = (
             df[~pd.isna(df["energy_star_rating"])]
             .groupby(self.MATCH_KEYS, as_index=False)
-            .mean()[self.MATCH_KEYS + ["energy_star_rating"]]
+            .median()[self.MATCH_KEYS + ["energy_star_rating"]]
         )
         avg_df = avg_df.rename(columns={"energy_star_rating": "avg_energy_star_rating"})
 
@@ -68,15 +68,14 @@ class ModelMatchPredictor:
         df["std_energy_star_rating"] = (
             df["energy_star_rating"]
             .fillna(df["avg_energy_star_rating"])
-            .fillna(df[df["_DATASET"] == "train"]["energy_star_rating"].mean())
+            .fillna(df[df["_DATASET"] == "train"]["energy_star_rating"].median())
         )
-        # TODO: Try median?
 
         # `year_built`
         df.loc[df["year_built"] == 0, "year_built"] = np.NaN
         df["na_year_built"] = pd.isna(df["year_built"])
         df["std_year_built"] = df["year_built"].fillna(
-            df[df["_DATASET"] == "train"]["year_built"].mean()
+            df[df["_DATASET"] == "train"]["year_built"].median()
         )
         df["log_year_built"] = np.log(df["std_year_built"])
 
