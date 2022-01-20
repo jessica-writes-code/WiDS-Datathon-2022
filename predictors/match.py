@@ -19,25 +19,39 @@ class ModelMatchPredictor:
     across dataset (when matched records are unavailable)"""
 
     MATCH_KEYS = ["State_Factor", "floor_area", "year_built"]
-    KEEP_VARS = [
-                "id",
-                "_DATASET",
-                "State_Factor",
-                "avg_temp",
-                "floor_area",
-                "log_floor_area",
-                "year_built",
-                "std_year_built",
-                "log_year_built",
-                "na_year_built",
-                "std_energy_star_rating",
-                "site_eui",
-                "log_site_eui",
-            ]
+    PRED_VARS1 = [
+        # Temperature
+        "avg_temp",
+        # Energy Star
+        "std_energy_star_rating",
+        "na_energy_star_rating",
+        # Floor area
+        "floor_area",
+        "log_floor_area",
+        # Building Category
+        "is_commercial",
+        # Year Built
+        "std_year_built",
+        "log_year_built",
+        "na_year_built",
+    ]
 
     def clean_dfs(
         self, train_df: pd.DataFrame, test_df: pd.DataFrame
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+
+        KEEP_VARS = list(
+            set(
+                [
+                    "id",
+                    "_DATASET",
+                    *self.MATCH_KEYS,
+                    *self.PRED_VARS1,
+                    "site_eui",
+                    "log_site_eui",
+                ]
+            )
+        )
 
         # Combine data sets
         train_df["_DATASET"] = "train"
@@ -83,8 +97,7 @@ class ModelMatchPredictor:
         df["log_site_eui"] = np.log(df["site_eui"])
 
         # Down-select to only useful columns
-        # TODO: move lists of variables to class vars
-        df = df[self.KEEP_VARS]
+        df = df[KEEP_VARS]
 
         return (
             df[df["_DATASET"] == "train"].drop("_DATASET", axis=1),
@@ -103,21 +116,9 @@ class ModelMatchPredictor:
 
         # Train a model to be used on test observations that do not
         # match any of our training observations
-        # - Note: We are predicting `log_site_eui`
         self._regr = GradientBoostingRegressor()
         self._regr.fit(
-            train_df[
-                [
-                    "avg_temp",
-                    "floor_area",
-                    "log_floor_area",
-                    "std_year_built",
-                    "log_year_built",
-                    "na_year_built",
-                    "std_energy_star_rating",
-                ]
-            ],
-            train_df["site_eui"],
+            train_df[self.PRED_VARS1], train_df["site_eui"],
         )
 
         self.fitted = True
@@ -127,21 +128,7 @@ class ModelMatchPredictor:
         test_df = test_df.merge(self._match_df, on=self.MATCH_KEYS, how="left")
 
         # TODO: Comments
-        predictions = pd.Series(
-            self._regr.predict(
-                test_df[
-                    [
-                        "avg_temp",
-                        "floor_area",
-                        "log_floor_area",
-                        "std_year_built",
-                        "log_year_built",
-                        "na_year_built",
-                        "std_energy_star_rating",
-                    ]
-                ],
-            )
-        )
+        predictions = pd.Series(self._regr.predict(test_df[self.PRED_VARS1]))
         test_df["site_eui"] = test_df["site_eui"].fillna(predictions)
 
         return test_df[["id", "site_eui"]]
