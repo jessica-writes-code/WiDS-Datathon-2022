@@ -7,8 +7,7 @@ from utils import helpers
 
 
 def calculate_cv_error(df: pd.DataFrame, model, n_splits: int = 5):
-    df = df.sample(frac=1)
-    kf = KFold(n_splits=n_splits)
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=0)
     mse_list = []
 
     for train_index, test_index in kf.split(df):
